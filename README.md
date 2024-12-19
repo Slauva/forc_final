@@ -1,4 +1,4 @@
-# Robot Control Homework
+# Robot Control Final
 
 A collection of examples demonstrating robot control and dynamics computation using MuJoCo and Pinocchio.
 
@@ -13,21 +13,22 @@ conda env create -f env.yml
 conda activate forc_hw
 ```
 
-## Report
+## Basic Inverse Dynamics Controller
 
-The report with all descriptions for task 1 and plots for tasks 2, 3 in the [report.pdf](report.pdf) 
+<div style="display: flex; pad: 10px">
+<img src="logs/videos/tsc.gif" width="600">
 
-## Tasks
-The examples allow for both quazi-real-time visualization and headless operation giving the user flexibility in how they run the simulations.
+<img src="logs/plots/se3_tsc.svg" width="600">
+</div>
 
-- `task1`: in report file
-- `task2.py`: Simulation where manipulator following by the target
-- `task3.py`: Simulation where manipulator following by circler trajectory
-  
-## Videos and Plottings
+## Sliding Mode Controller
 
-- `task2.py`: The [video](logs/videos/target_moving.mp4), position [plot](logs/plots/target_moving_pos.png) or in report, velocities [plot](logs/plots/target_moving_vel.png) or in report
-- `task3.py`: The [video](logs/videos/trajectory.mp4), position [plot](logs/plots/trajectory_pos.png) or in report, velocities [plot](logs/plots/trajectory_vel.png) or in report
+<div style="display: flex; pad: 10px">
+<img src="logs/videos/sliding.gif" width="600">
+<img src="logs/plots/se3_sliding.svg" width="600">
+<img src="logs/plots/err_sliding.svg" width="600">
+<img src="logs/plots/lya_sliding.svg" width="600">
+</div>
 
 
 ## Interaction with Viewer
