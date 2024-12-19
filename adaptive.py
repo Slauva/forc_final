@@ -4,20 +4,21 @@ import os
 import pinocchio as pin
 from simulator import Simulator
 from utils import so3_error, jacobian
+from convert import convert_to_gif
 from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 
 @dataclass
 class Monitor:
-    q = []
-    dq = []
     e = []
     de = []
     s = []
     dV = []
     t = []
     tau = []
+    xpos = []
+    xdes = []
 
 def convert_desired(desired: dict) -> tuple[pin.SE3, np.ndarray, np.ndarray]:
     desired_position = desired['pos']
@@ -32,6 +33,8 @@ def task_space_controller(q: np.ndarray, dq: np.ndarray, t: float, desired: dict
     pin.computeAllTerms(model, data, q, dq)
     current = pin.updateFramePlacement(model, data, ee_frame_id)
     desired, dx_d, ddx_d = convert_desired(desired)
+    Monitor.xpos.append(pin.SE3ToXYZQUAT(current))
+    Monitor.xdes.append(pin.SE3ToXYZQUAT(desired))
     
     # Get current model matricies
     J, dJ = jacobian(model, data, ee_frame_id)
@@ -55,8 +58,6 @@ def task_space_controller(q: np.ndarray, dq: np.ndarray, t: float, desired: dict
     tau = J.T @ f
     
     # Collect data monitor
-    Monitor.q.append(q)
-    Monitor.dq.append(dq)
     Monitor.t.append(t)
     Monitor.e.append(e)
     Monitor.de.append(de)
@@ -76,6 +77,9 @@ def sliding_controller(q: np.ndarray, dq: np.ndarray, t: float, desired: dict) -
     pin.computeAllTerms(model, data, q, dq)
     current = pin.updateFramePlacement(model, data, ee_frame_id)
     desired, dx_d, ddx_d = convert_desired(desired)
+    Monitor.xpos.append(pin.SE3ToXYZQUAT(current))
+    Monitor.xdes.append(pin.SE3ToXYZQUAT(desired))
+    
     
     # Get current model matricies
     J, dJ = jacobian(model, data, ee_frame_id)
@@ -103,8 +107,6 @@ def sliding_controller(q: np.ndarray, dq: np.ndarray, t: float, desired: dict) -
     tau = data.M @ (ddq_d + L * (dq_d - dq)) + data.nle - Kd * sign(s, eps, mode=2)
     
     # Collect data monitor
-    Monitor.q.append(q)
-    Monitor.dq.append(dq)
     Monitor.t.append(t)
     Monitor.e.append(e)
     Monitor.de.append(de)
@@ -114,7 +116,40 @@ def sliding_controller(q: np.ndarray, dq: np.ndarray, t: float, desired: dict) -
     
     return tau
 
-def plotter():
+def pos_ori_plotter(fname: str = None):
+    names = [
+        "x", "y", "z", "q0", "q1", "q2", "q3"
+    ]
+    
+    t = np.array(Monitor.t)
+    xpos = np.array(Monitor.xpos)
+    xdes = np.array(Monitor.xdes)
+    
+    fig, axes = plt.subplots(2, 1, figsize = (12, 12))
+    axes[0].set_title("Position of End-Effector and Desired Point")
+    axes[0].set_ylabel("Position")
+    axes[1].set_title("Orientation of End-Effector and Desired Point")
+    axes[1].set_ylabel("Orientation by Quaternion")
+    
+    for i, name in enumerate(names[:3]):
+        axes[0].plot(t, xpos[:, i], label=name)
+        axes[0].plot(t, xdes[:, i], label=f"Desired {name}", linestyle="--", alpha=0.7)
+    for i, name in enumerate(names[3:]):
+        axes[1].plot(t, xpos[:, i+3], label=name)
+        axes[1].plot(t, xdes[:, i+3], label=f"Desired {name}", linestyle="--", alpha=0.7)
+        
+    for j in range(2):
+        axes[j].grid(True, linewidth=1, linestyle="--", alpha=0.7, color="gray")
+        axes[j].legend(ncol=3+j)
+        axes[j].set_xlabel("Time (s)")
+    
+    plt.subplots_adjust(hspace=0.6)
+    if fname is None:
+        plt.show()
+    else:
+        plt.savefig(f"logs/plots/{fname}.svg")
+
+def error_plotter(fname: str = None):
     joint_names = [
             "shoulder_pan",
             "shoulder_lift",
@@ -125,64 +160,70 @@ def plotter():
     ]
     
     t = np.array(Monitor.t)
-    q = np.array(Monitor.q)
-    dq = np.array(Monitor.dq)
-    
-    fig, axes = plt.subplots(2, 1, figsize = (18, 12))
-    fig.suptitle("Joint positions and velocities")
-    axes[0].set_title("Positions")
-    axes[1].set_title("Velocities")
-    axes[0].set_ylabel("Positions")
-    axes[1].set_ylabel("Velocities")
-    for i, name in enumerate(joint_names):
-        axes[0].plot(t, q[:, i], label=name)
-    for i, name in enumerate(joint_names):
-        axes[1].plot(t, dq[:, i], label=name)
-    for j in range(2):
-        axes[j].grid(True, linewidth=1, linestyle="--", alpha=0.7, color="gray")
-        axes[j].legend()
-        axes[j].set_xlabel("Time (s)")
-    plt.show()
-    
     e = np.array(Monitor.e)
     de = np.array(Monitor.de)
+    s = np.array(Monitor.s if len(Monitor.s) != 0 else np.zeros_like(de))
     
-    fig, axes = plt.subplots(2, 1, figsize = (18, 12))
-    fig.suptitle("Error positions and velocities")
-    axes[0].set_title("Positions")
-    axes[1].set_title("Velocities")
-    axes[0].set_ylabel("Positions")
-    axes[1].set_ylabel("Velocities")
+    fig, axes = plt.subplots(3, 1, figsize = (12, 18))
+    axes[0].set_title(r"Position Error $e = x_{des} - x$")
+    axes[0].set_ylabel(r"Position")
+    axes[1].set_title(r"Velocity Error $\dot e = \dot x_{des} - J \dot q$")
+    axes[1].set_ylabel(r"Velocity")
+    axes[2].set_title(r"Sliding Window $s = \dot e + \Lambda e$")
+    axes[2].set_ylabel(r"Sliding Parameter")
+    
     for i, name in enumerate(joint_names):
         axes[0].plot(t, e[:, i], label=name)
     for i, name in enumerate(joint_names):
         axes[1].plot(t, de[:, i], label=name)
-    for j in range(2):
-        axes[j].grid(True, linewidth=1, linestyle="--", alpha=0.7, color="gray")
-        axes[j].legend()
-        axes[j].set_xlabel("Time (s)")
-    plt.show()
-    
-    s = np.array(Monitor.s if len(Monitor.s) != 0 else np.zeros_like(dq))
-    dV = np.array(Monitor.dV if len(Monitor.dV) != 0 else np.zeros_like(t))
-    tau = np.array(Monitor.tau if len(Monitor.tau) != 0 else np.zeros_like(dq))
-    
-    fig, axes = plt.subplots(3, 1, figsize = (18, 18))
-    axes[0].set_title("Sliding Window")
-    axes[1].set_title("Lyapunov Stability")
-    axes[2].set_title("Torque")
     for i, name in enumerate(joint_names):
-        axes[0].plot(t, s[:, i], label=name)
-    
-    for i, name in enumerate(joint_names):
-        axes[2].plot(t, tau[:, i], label=name)
+        axes[2].plot(t, s[:, i], label=name)
         
-    axes[1].plot(t, dV, label=r"$\dot V = -K * ||s||$")
     for j in range(3):
         axes[j].grid(True, linewidth=1, linestyle="--", alpha=0.7, color="gray")
-        axes[j].legend()
+        axes[j].legend(ncol=len(joint_names))
         axes[j].set_xlabel("Time (s)")
-    plt.show()
+        
+    plt.subplots_adjust(hspace=0.6)
+    if fname is None:
+        plt.show()
+    else:
+        plt.savefig(f"logs/plots/{fname}.svg")
+    
+def lyapunov_tau_plotter(fname: str = None):
+    joint_names = [
+            "shoulder_pan",
+            "shoulder_lift",
+            "elbow",
+            "wrist_1",
+            "wrist_2",
+            "wrist_3",
+    ]
+    
+    t = np.array(Monitor.t)
+    tau = np.array(Monitor.tau)
+    dV = np.array(Monitor.dV if len(Monitor.dV) != 0 else np.zeros_like(t))
+    
+    fig, axes = plt.subplots(2, 1, figsize = (12, 12))
+    axes[0].set_title(r"Torque on Joints")
+    axes[0].set_ylabel(r"Torque $\tau$")
+    axes[1].set_title(r"Lyapunov Stability $\dot V = -K * ||s||$")
+    axes[1].set_ylabel("Lyapunov Stability")
+    
+    for i, name in enumerate(joint_names):
+        axes[0].plot(t, tau[:, i], label=name)
+    axes[1].plot(t, dV)
+        
+    for j in range(2):
+        axes[j].grid(True, linewidth=1, linestyle="--", alpha=0.7, color="gray")
+        axes[j].legend(ncol=3)
+        axes[j].set_xlabel("Time (s)")
+        
+    plt.subplots_adjust(hspace=0.6)
+    if fname is None:
+        plt.show()
+    else:
+        plt.savefig(f"logs/plots/{fname}.svg")
 
 def main():
     # Create logging directories
@@ -194,7 +235,7 @@ def main():
         enable_task_space=True,
         show_viewer=True,
         record_video=True,
-        video_path="logs/videos/adaptive.mp4",
+        video_path="logs/videos/unknown.mp4",
         fps=30,
         width=1920,
         height=1080 
@@ -211,12 +252,21 @@ def main():
     # Modify end-effector mass
     sim.modify_body_properties("end_effector", mass=4)
     
-    # sim.set_controller(task_space_controller)
-    # sim.run(time_limit=10.0)
+    sim.video_path = Path("logs/videos/tsc.mp4")
+    sim.set_controller(task_space_controller)
+    sim.run(time_limit=1.5)
+    pos_ori_plotter("se3_tsc")
+    error_plotter("err_tsc")
+    lyapunov_tau_plotter("lya_tsc")
     
+    sim.video_path = Path("logs/videos/sliding.mp4")
     sim.set_controller(sliding_controller)
-    sim.run(time_limit=10.0)
-    plotter()
+    sim.run(time_limit=1.5)
+    pos_ori_plotter("se3_sliding")
+    error_plotter("err_sliding")
+    lyapunov_tau_plotter("lya_sliding")
+    
+    convert_to_gif()
     
 
 if __name__ == "__main__":
